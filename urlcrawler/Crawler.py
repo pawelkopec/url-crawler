@@ -16,27 +16,25 @@ class Crawler(object):
         if paths is None:
             paths = []
 
+        paths = [''] + paths
+
         if logs:
             print('Started searching domain {}\n'.format(domain))
 
-        self.crawl(domain, '', paths, tree, path_predictor, timeout, logs)
-
-        for path in paths:
-            self.crawl(domain, path, paths, tree, path_predictor, timeout, logs)
-
-        if path_predictor:
-            while True:
-                for path in paths:
-                    self.crawl(domain, path, paths, tree, path_predictor,
-                               timeout, logs)
-
-                if path_predictor.has_paths():
-                    paths.append(path_predictor.draw())
-
-                if len(paths) == 0:
-                    break
+        self.crawl_loop_func(domain, paths, tree, path_predictor, timeout, logs)
 
         return tree.as_dict()
+
+    def crawl_loop_func(self, domain, paths, tree,
+                           path_predictor, timeout, logs):
+        while paths:
+            while paths:
+                self.crawl(domain, paths.pop(), paths, tree, path_predictor,
+                           timeout, logs)
+
+            if paths and path_predictor is not None:
+                if path_predictor.has_paths():
+                    paths.append(path_predictor.draw())
 
     def crawl(self, domain, path, paths, tree, path_predictor, timeout, logs):
         path = self.normalize_path(path)
@@ -71,7 +69,9 @@ class Crawler(object):
                 found_paths = self.find_new_paths(head, domain, path, timeout)
 
                 if found_paths is not None:
-                    paths += found_paths
+                    for found_path in found_paths:
+                        if found_path not in paths:
+                            paths.append(found_path)
 
         except (RequestException, UnicodeDecodeError) as e:
             if logs:
