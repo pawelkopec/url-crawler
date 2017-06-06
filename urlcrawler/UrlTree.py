@@ -1,19 +1,26 @@
+from threading import Lock
+
 
 class UrlTree(object):
 
     def __init__(self):
         self.root = {'children': []}
+        self.codes = 0
+        self.lock = Lock()
 
     def get_node_for_path(self, path):
+        self.lock.acquire()
         nodes = self.path_to_nodes(path)
         current_node = self.root
 
         for i in range(len(nodes)):
             if not self.has_child_for_name(current_node, nodes[i]):
+                self.lock.release()
                 return None
 
             current_node = self.get_child_by_name(current_node, nodes[i])
 
+        self.lock.release()
         return current_node
 
     def contains_path(self, path):
@@ -25,9 +32,15 @@ class UrlTree(object):
         if node is None:
             return False
 
-        return node.get('response-code') is not None
+        self.lock.acquire()
+        has_code = node.get('response-code') is not None
+        self.lock.release()
+
+        return has_code
 
     def add_code_for_path(self, path, code):
+        self.lock.acquire()
+        self.codes += 1
         nodes = self.path_to_nodes(path)
         current_parent = self.root
 
@@ -52,17 +65,25 @@ class UrlTree(object):
                 }
 
                 current_parent.get('children').append(new_child)
+                self.lock.release()
 
                 return
 
         current_parent['response-code'] = code
+        self.lock.release()
 
     def as_dict(self):
         hidden_root = self.get_child_by_name(self.root, self.ROOT_DUMMY)
 
         if hidden_root:
+            self.lock.acquire()
             tree = hidden_root.copy()
+            self.lock.release()
             self.remove_none_keys(tree)
+            tree = {
+                'paths': tree,
+                'active-paths': self.codes
+            }
 
             return tree
 

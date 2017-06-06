@@ -1,3 +1,6 @@
+from threading import Lock, active_count, Thread
+from time import sleep
+
 import requests
 from requests.exceptions import RequestException
 
@@ -7,8 +10,11 @@ from urlcrawler.UrlTree import UrlTree
 
 class Crawler(object):
 
-    def search_active_urls(self, domain, paths=None,
-                           path_predictor=None, timeout=1, logs=False):
+    def __init__(self):
+        self.lock = Lock()
+
+    def search_active_urls(self, domain, paths=None, path_predictor=None,
+                           max_threads=10,  timeout=1, logs=False):
         domain = self.normalize_domain(domain)
 
         tree = UrlTree()
@@ -21,31 +27,68 @@ class Crawler(object):
         if logs:
             print('Started searching domain {}\n'.format(domain))
 
-        self.crawl_loop_func(domain, paths, tree, path_predictor, timeout, logs)
+        self.crawl_loop_func(domain, paths, tree, path_predictor,
+                             max_threads, timeout, logs)
 
         return tree.as_dict()
 
     def crawl_loop_func(self, domain, paths, tree,
-                           path_predictor, timeout, logs):
-        while paths:
-            while paths:
-                self.crawl(domain, paths.pop(), paths, tree, path_predictor,
-                           timeout, logs)
+                           path_predictor, max_threads, timeout, logs):
+        not_in_use = set(paths)
+        path = paths.pop()
+        while True:
 
-            if paths and path_predictor is not None:
-                if path_predictor.has_paths():
-                    paths.append(path_predictor.draw())
+            while max_threads == active_count():
+                pass
 
-    def crawl(self, domain, path, paths, tree, path_predictor, timeout, logs):
+            args = (domain, path, paths, not_in_use, tree, path_predictor, timeout,
+                    logs)
+
+            Thread(target=self.crawl, args=args).start()
+
+            while True:
+                self.lock.acquire()
+
+                if paths:
+                    path = paths.pop()
+                    self.lock.release()
+
+                    path = self.preprocess_path(path, paths, not_in_use, tree)
+                    if path is not None:
+                        break
+                else:
+                    self.lock.release()
+
+                if active_count() == 1:
+                    return
+
+                sleep(0.01)
+
+            # if paths and path_predictor is not None:
+            #     if path_predictor.has_paths():
+            #         paths.append(path_predictor.draw())
+
+    def preprocess_path(self, path, paths, not_in_use, tree):
         path = self.normalize_path(path)
 
         delimiters = [i for i, c in enumerate(path) if c == '/']
 
-        for d in delimiters:
-            paths.append(path[:d])
+        if delimiters:
+            for d in delimiters[1:]:
+                new_path = path[:d]
+                self.lock.acquire()
+                if new_path not in not_in_use:
+                    paths.append(new_path)
+                    not_in_use.add(new_path)
+                self.lock.release()
 
         if tree.has_code_for_path(path):
-            return
+            return None
+
+        return path
+
+    def crawl(self, domain, path, paths, not_in_use, tree, path_predictor,
+              timeout, logs):
 
         try:
             head = requests.head(domain + path, timeout=timeout)
@@ -70,8 +113,13 @@ class Crawler(object):
 
                 if found_paths is not None:
                     for found_path in found_paths:
-                        if found_path not in paths:
+                        self.lock.acquire()
+
+                        if found_path not in not_in_use:
                             paths.append(found_path)
+                            not_in_use.add(found_path)
+
+                        self.lock.release()
 
         except (RequestException, UnicodeDecodeError) as e:
             if logs:
