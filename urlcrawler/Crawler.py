@@ -11,31 +11,40 @@ class Crawler(object):
                            path_predictor=None, timeout=1, logs=False):
         domain = self.normalize_domain(domain)
 
+        tree = UrlTree()
+
+        if paths is None:
+            paths = []
+
         if logs:
             print('Started searching domain {}\n'.format(domain))
 
-        tree = UrlTree()
+        self.crawl(domain, '', paths, tree, path_predictor, timeout, logs)
 
-        self.crawl(domain, '', tree, path_predictor, timeout, logs)
-
-        if paths:
-            for path in paths:
-                self.crawl(domain, path, tree, path_predictor, timeout, logs)
+        for path in paths:
+            self.crawl(domain, path, paths, tree, path_predictor, timeout, logs)
 
         if path_predictor:
-            while path_predictor.has_paths():
-                path = path_predictor.draw()
-                self.crawl(domain, path, tree, timeout, logs)
+            while True:
+                for path in paths:
+                    self.crawl(domain, path, paths, tree, path_predictor,
+                               timeout, logs)
+
+                if path_predictor.has_paths():
+                    paths.append(path_predictor.draw())
+
+                if len(paths) == 0:
+                    break
 
         return tree.as_dict()
 
-    def crawl(self, domain, path, tree, path_predictor, timeout, logs):
+    def crawl(self, domain, path, paths, tree, path_predictor, timeout, logs):
         path = self.normalize_path(path)
 
         delimiters = [i for i, c in enumerate(path) if c == '/']
 
         for d in delimiters:
-            self.crawl(domain, path[:d], tree, path_predictor, timeout, logs)
+            paths.append(path[:d])
 
         if tree.has_code_for_path(path):
             return
@@ -59,24 +68,33 @@ class Crawler(object):
                     print('Successfully found resource under {}'
                           .format(path or '/'))
 
-                if not self.has_xml_based_resource(head):
-                    return
+                found_paths = self.find_new_paths(head, domain, path, timeout)
 
-                response = requests.get(domain + path, timeout=timeout)
-
-                if response.apparent_encoding is None:
-                    return
-
-                finder = ServerPathFinder(domain)
-                finder.feed(response.content.decode(response.apparent_encoding))
-
-                for p in finder.paths:
-                    self.crawl(domain, p, tree, path_predictor, timeout, logs)
+                if found_paths is not None:
+                    paths += found_paths
 
         except (RequestException, UnicodeDecodeError) as e:
             if logs:
                 print('\nSearching aborted for resource {} :\n\t{}\n'
                       .format(path, e))
+
+    def find_new_paths(self, head, domain, path, timeout):
+        try:
+            if not self.has_xml_based_resource(head):
+                return None
+
+            response = requests.get(domain + path, timeout=timeout)
+
+            if response.apparent_encoding is None:
+                return None
+
+            finder = ServerPathFinder(domain)
+            finder.feed(response.content.decode(response.apparent_encoding))
+
+            return finder.paths
+
+        except UnicodeDecodeError as e:
+            raise e
 
     @staticmethod
     def has_xml_based_resource(head):
