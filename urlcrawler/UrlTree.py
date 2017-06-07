@@ -1,5 +1,7 @@
 from threading import Lock
 
+# a class for storing hierarchy of resources
+# of a server in a form of a tree within a dict
 
 class UrlTree(object):
 

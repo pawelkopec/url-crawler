@@ -6,6 +6,8 @@ from requests.exceptions import RequestException
 from urlcrawler.ServerPathFinder import ServerPathFinder
 from urlcrawler.UrlTree import UrlTree
 
+# a class for searching through website's resources and
+# gathering information about it
 
 class Crawler(object):
 
@@ -14,14 +16,12 @@ class Crawler(object):
 
     def search_active_urls(self, domain, paths=None, path_predictor=None,
                            max_threads=10,  timeout=1, logs=False):
-        domain = self.normalize_domain(domain)
 
+        domain = self.normalize_domain(domain)
         tree = UrlTree()
 
         if paths is None:
             paths = []
-
-        paths = [''] + paths
 
         if logs:
             print('Started searching domain {}\n'.format(domain))
@@ -33,18 +33,25 @@ class Crawler(object):
 
     def crawl_loop_func(self, domain, paths, tree,
                            path_predictor, max_threads, timeout, logs):
+
+        # set of paths that are not to be checked again by the crawler
         not_in_use = set(paths)
-        path = paths.pop()
+
+        # root as initial path
+        path = ''
+
         while True:
 
+            # wait for supplying thread-poll
             while max_threads == active_count():
                 pass
 
-            args = (domain, path, paths, not_in_use, tree, path_predictor, timeout,
-                    logs)
-
+            # prepare and run thread to check new path
+            args = (domain, path, paths, not_in_use, tree,
+                    path_predictor, timeout, logs)
             Thread(target=self.crawl, args=args).start()
 
+            # try to retrieve a path for a new thread
             while True:
                 self.lock.acquire()
 
@@ -58,10 +65,14 @@ class Crawler(object):
                 else:
                     self.lock.release()
 
+                # finish if there are no paths, no threads
+                # that can find new paths and no predictor
+                # that will guess new paths
                 if active_count() == 1:
-                    if not paths:
+                    if not paths and path_predictor is None:
                         return
 
+            # try to supply paths with predictor
             if not paths and path_predictor is not None:
                 if path_predictor.has_paths():
                     paths.append(path_predictor.draw())
@@ -69,6 +80,7 @@ class Crawler(object):
     def preprocess_path(self, path, paths, not_in_use, tree):
         path = self.normalize_path(path)
 
+        # add subdirectories of given path to paths
         delimiters = [i for i, c in enumerate(path) if c == '/']
 
         if delimiters:
@@ -80,6 +92,7 @@ class Crawler(object):
                     not_in_use.add(new_path)
                 self.lock.release()
 
+        # if path has already been checked successfully
         if tree.has_code_for_path(path):
             return None
 
@@ -89,6 +102,8 @@ class Crawler(object):
               timeout, logs):
 
         try:
+            # first get only light head to check parameters
+            # and response code of a file
             head = requests.head(domain + path, timeout=timeout)
             code = head.status_code
 
@@ -107,8 +122,10 @@ class Crawler(object):
                     print('Successfully found resource under {}'
                           .format(path or '/'))
 
+                # try to find trace of other resources in this file
                 found_paths = self.find_new_paths(head, domain, path, timeout)
 
+                # add links to new potential resources to paths
                 if found_paths is not None:
                     for found_path in found_paths:
                         self.lock.acquire()
@@ -119,10 +136,13 @@ class Crawler(object):
 
                         self.lock.release()
 
+        # if networking failed
         except RequestException as e:
             if logs:
                 print('\nSearching aborted for resource {} :\n\t{}\n'
                       .format(path, e))
+
+        # if parsing a html/xml failed
         except UnicodeDecodeError as e:
             if logs:
                 print('\nText analysing aborted for resource {} :\n\t{}\n'
@@ -130,14 +150,18 @@ class Crawler(object):
 
     def find_new_paths(self, head, domain, path, timeout):
         try:
+            # we look for new paths only in text resources
             if not self.has_xml_based_resource(head):
                 return None
 
+            # after retrieving a head before now request for whole body
             response = requests.get(domain + path, timeout=timeout)
 
+            # check if file can be potentially processed
             if response.apparent_encoding is None:
                 return None
 
+            # find paths to new potential resources
             finder = ServerPathFinder(domain)
             finder.feed(response.content.decode(response.apparent_encoding))
 
