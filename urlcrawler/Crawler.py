@@ -1,5 +1,4 @@
 from threading import Lock, active_count, Thread
-from time import sleep
 
 import requests
 from requests.exceptions import RequestException
@@ -60,13 +59,12 @@ class Crawler(object):
                     self.lock.release()
 
                 if active_count() == 1:
-                    return
+                    if not paths:
+                        return
 
-                sleep(0.01)
-
-            # if paths and path_predictor is not None:
-            #     if path_predictor.has_paths():
-            #         paths.append(path_predictor.draw())
+            if not paths and path_predictor is not None:
+                if path_predictor.has_paths():
+                    paths.append(path_predictor.draw())
 
     def preprocess_path(self, path, paths, not_in_use, tree):
         path = self.normalize_path(path)
@@ -121,9 +119,13 @@ class Crawler(object):
 
                         self.lock.release()
 
-        except (RequestException, UnicodeDecodeError) as e:
+        except RequestException as e:
             if logs:
                 print('\nSearching aborted for resource {} :\n\t{}\n'
+                      .format(path, e))
+        except UnicodeDecodeError as e:
+            if logs:
+                print('\nText analysing aborted for resource {} :\n\t{}\n'
                       .format(path, e))
 
     def find_new_paths(self, head, domain, path, timeout):
