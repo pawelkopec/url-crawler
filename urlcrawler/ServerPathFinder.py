@@ -1,5 +1,6 @@
 from html.parser import HTMLParser
 
+
 # a class for finding resources of given domain
 # on an html page like links and images
 

@@ -6,6 +6,7 @@ from requests.exceptions import RequestException
 from urlcrawler.ServerPathFinder import ServerPathFinder
 from urlcrawler.UrlTree import UrlTree
 
+
 # a class for searching through website's resources and
 # gathering information about it
 
@@ -14,8 +15,8 @@ class Crawler(object):
     def __init__(self):
         self.lock = Lock()
 
-    def search_active_urls(self, domain, paths=None, path_predictor=None,
-                           max_threads=10,  timeout=1, logs=False):
+    def get_website_tree(self, domain, paths=None, path_predictor=None,
+                         max_threads=10, timeout=1, logs=False):
 
         domain = self.normalize_domain(domain)
         tree = UrlTree()
@@ -26,13 +27,13 @@ class Crawler(object):
         if logs:
             print('Started searching domain {}\n'.format(domain))
 
-        self.crawl_loop_func(domain, paths, tree, path_predictor,
-                             max_threads, timeout, logs)
+        self.check_paths_async(domain, paths, tree, path_predictor,
+                               max_threads, timeout, logs)
 
         return tree.as_dict()
 
-    def crawl_loop_func(self, domain, paths, tree,
-                           path_predictor, max_threads, timeout, logs):
+    def check_paths_async(self, domain, paths, tree,
+                          path_predictor, max_threads, timeout, logs):
 
         # set of paths that are not to be checked again by the crawler
         not_in_use = set(paths)
@@ -49,7 +50,7 @@ class Crawler(object):
             # prepare and run thread to check new path
             args = (domain, path, paths, not_in_use, tree,
                     path_predictor, timeout, logs)
-            Thread(target=self.crawl, args=args).start()
+            Thread(target=self.check_path, args=args).start()
 
             # try to retrieve a path for a new thread
             while True:
@@ -59,7 +60,7 @@ class Crawler(object):
                     path = paths.pop()
                     self.lock.release()
 
-                    path = self.preprocess_path(path, paths, not_in_use, tree)
+                    path = self.preproces_path(path, paths, not_in_use, tree)
                     if path is not None:
                         break
                 else:
@@ -77,7 +78,7 @@ class Crawler(object):
                 if path_predictor.has_paths():
                     paths.append(path_predictor.draw())
 
-    def preprocess_path(self, path, paths, not_in_use, tree):
+    def preproces_path(self, path, paths, not_in_use, tree):
         path = self.normalize_path(path)
 
         # add subdirectories of given path to paths
@@ -98,8 +99,8 @@ class Crawler(object):
 
         return path
 
-    def crawl(self, domain, path, paths, not_in_use, tree, path_predictor,
-              timeout, logs):
+    def check_path(self, domain, path, paths, not_in_use, tree, path_predictor,
+                   timeout, logs):
 
         try:
             # first get only light head to check parameters
